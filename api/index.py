@@ -270,14 +270,12 @@ async def process_query(request: QueryRequest):
         )
         
         return Response(
-            response=response.choices[0].message.content,
-            request_id=request_id
+            response="successful",
         )
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
         return Response(
-            response=f"Error processing your query: {str(e)}",
-            request_id=request_id
+            response="unsucessful"
         )
 
 # Root route for Vercel
