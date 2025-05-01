@@ -261,22 +261,36 @@ async def process_query(request: QueryRequest):
         # Generate response with OpenAI directly
         logger.info("Generating response with OpenAI")
         
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": request.query}
-            ]
-        )
+        # Check which client type we're using (legacy or new)
+        if hasattr(client, 'chat') and hasattr(client.chat, 'completions'):
+            # New client style
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": request.query}
+                ]
+            )
+            response_text = response.choices[0].message.content
+        else:
+            # Legacy client style
+            response = client.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": request.query}
+                ]
+            )
+            response_text = response.choices[0].message.content
         
         return Response(
-            response="successful",
+            response=response_text,
             request_id=request_id
         )
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
         return Response(
-            response="unsucessful",
+            response=f"Error processing your query: {str(e)}",
             request_id=request_id
         )
 
