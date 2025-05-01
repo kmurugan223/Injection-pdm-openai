@@ -1,13 +1,107 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import sys
+from pydantic import BaseModel
 import os
+from openai import OpenAI
+import pinecone
+from typing import List, Dict, Any
+import uuid
 
-# Add the parent directory to sys.path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+app = FastAPI()
 
-# Import your main app
-from app import app as app_instance
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# For Vercel serverless functions
-app = app_instance
+# Initialize OpenAI client
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+# Initialize Pinecone for vector storage
+try:
+    pinecone.init(
+        api_key=os.environ.get("PINECONE_API_KEY"),
+        environment=os.environ.get("PINECONE_ENVIRONMENT")
+    )
+    index_name = "documents-index"
+    index = pinecone.Index(index_name)
+except Exception as e:
+    print(f"Pinecone initialization error: {str(e)}")
+
+class QueryRequest(BaseModel):
+    query: str
+    max_results: int = 3
+
+class RAGResponse(BaseModel):
+    response: str
+    sources: List[Dict[str, Any]] = []
+    request_id: str
+
+@app.post("/api/query")
+async def process_query(request: QueryRequest):
+    try:
+        # Convert query to embedding
+        query_embedding = client.embeddings.create(
+            model="text-embedding-ada-002",
+            input=request.query
+        ).data[0].embedding
+        
+        # Search in Pinecone
+        search_results = index.query(
+            vector=query_embedding,
+            top_k=request.max_results,
+            include_metadata=True
+        )
+        
+        # Format context from search results
+        contexts = []
+        sources = []
+        for match in search_results.matches:
+            if match.score < 0.7:  # Filter out irrelevant matches
+                continue
+            contexts.append(match.metadata.get("text", ""))
+            sources.append({
+                "title": match.metadata.get("title", "Unknown"),
+                "url": match.metadata.get("url", ""),
+                "relevance": match.score
+            })
+        
+        context_text = "\n\n---\n\n".join(contexts)
+        
+        # Generate response with OpenAI
+        prompt = f"""
+        Answer the following question based on the provided context. If the context doesn't contain 
+        relevant information, say "I don't have enough information to answer this question."
+        
+        Context:
+        {context_text}
+        
+        Question: {request.query}
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        request_id = str(uuid.uuid4())
+        
+        return RAGResponse(
+            response=response.choices[0].message.content,
+            sources=sources,
+            request_id=request_id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Root route for Vercel
+@app.get("/")
+def read_root():
+    return {"message": "FastAPI RAG API is running"}
