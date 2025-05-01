@@ -174,7 +174,6 @@
 # @app.get("/")
 # def read_root():
 #     return {"message": "FastAPI RAG API is running"}
-
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -209,11 +208,25 @@ async def test_endpoint():
 
 # Initialize OpenAI client
 try:
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    # For newer versions of the OpenAI client
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable not set")
+        
+    # Avoid passing any extra parameters 
+    client = OpenAI(api_key=api_key)
     logger.info("OpenAI client initialized successfully")
 except Exception as e:
     logger.error(f"OpenAI initialization failed: {str(e)}")
-    client = None
+    # Try a fallback method for older versions
+    try:
+        import openai
+        openai.api_key = os.environ.get("OPENAI_API_KEY")
+        client = openai
+        logger.info("OpenAI client initialized successfully with legacy method")
+    except Exception as fallback_error:
+        logger.error(f"Fallback OpenAI initialization failed: {str(fallback_error)}")
+        client = None
 
 class QueryRequest(BaseModel):
     query: str
