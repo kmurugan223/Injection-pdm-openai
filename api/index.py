@@ -150,7 +150,7 @@ async def process_query(request: QueryRequest):
         """
         
         response = client.chat.completions.create(
-            model="gpt-4-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
