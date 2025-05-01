@@ -1,88 +1,80 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-import openai
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from typing import Optional, List
 import os
-from typing import List, Dict, Any
-import uuid
-import logging
-from dotenv import load_dotenv
- 
-load_dotenv()
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
- 
-app = FastAPI()
- 
-API_KEY = os.environ.get("OPENAI_API_KEY")
-openai.api_key = API_KEY
- 
+from openai import OpenAI
+from fastapi.routing import APIRouter
+
+# Initialize FastAPI app
+app = FastAPI(title="OpenAI API with FastAPI")
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allows all origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
- 
-# Debug environment variables (don't log full API keys in production)
-logger.info(f"OPENAI_API_KEY present: {'Yes' if os.environ.get('OPENAI_API_KEY') else 'No'}")
- 
-# Test endpoint
-@app.get("/api/test")
-async def test_endpoint():
-    return {"status": "ok", "message": "API is running"}
- 
-class QueryRequest(BaseModel):
-    query: str
-    max_results: int = 3  # Keeping for backward compatibility, but not used anymore
- 
-class Response(BaseModel):
-    response: str
-    request_id: str
- 
-# Simple endpoint for OpenAI only
-@app.post("/api/simple-query")
-async def simple_query(request: QueryRequest):
-    return Response(
-        response=f"Received query: {request.query}",
-        request_id=str(uuid.uuid4())
-    )
- 
-@app.post("/api/query")
-async def process_query(request: QueryRequest):
-    request_id = str(uuid.uuid4())
-    logger.info(f"Request received: {request.query} with ID {request_id}")
+
+# Initialize OpenAI client
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+# Pydantic models for request validation
+class CompletionRequest(BaseModel):
+    prompt: str
+    max_tokens: Optional[int] = Field(default=150)
+    temperature: Optional[float] = Field(default=0.7)
     
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": request.query}
-            ]
-        )
-        response_text = response.choices[0].message.content
-        
-        return Response(
-            response=response_text,
-            request_id=request_id
-        )
-    except Exception as e:
-        logger.error(f"Error processing query: {str(e)}")
-        return Response(
-            response=f"Error processing your query: {str(e)}",
-            request_id=request_id
-        )
- 
-# Root route for Vercel
+class ChatRequest(BaseModel):
+    messages: List[dict]
+    max_tokens: Optional[int] = Field(default=150)
+    temperature: Optional[float] = Field(default=0.7)
+
+# Root endpoint
 @app.get("/")
 def read_root():
-    return {"message": "FastAPI OpenAI API is running"}
- 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
- 
+    return {"message": "Welcome to the OpenAI API with FastAPI"}
+
+# Health check endpoint (useful for Vercel)
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+# Text completion endpoint
+@app.post("/completion")
+async def get_completion(request: CompletionRequest):
+    try:
+        response = client.completions.create(
+            model="gpt-4o-mini",
+            prompt=request.prompt,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+        )
+        return {"result": response.choices[0].text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Chat completion endpoint
+@app.post("/chat")
+async def get_chat_completion(request: ChatRequest):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=request.messages,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+        )
+        return {"result": response.choices[0].message.content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Error handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"message": f"An unexpected error occurred: {str(exc)}"},
+    )
