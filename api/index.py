@@ -46,7 +46,7 @@ def health_check():
 async def get_completion(request: CompletionRequest):
     try:
         response = client.completions.create(
-            model="gpt-3.5-turbo-instruct",
+            model="gpt-4o-mini",
             prompt=request.prompt,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
@@ -60,7 +60,7 @@ async def get_completion(request: CompletionRequest):
 async def get_chat_completion(request: ChatRequest):
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=request.messages,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
